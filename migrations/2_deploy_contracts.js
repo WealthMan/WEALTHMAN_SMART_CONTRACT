@@ -20,7 +20,7 @@ module.exports = function (deployer) {
         return nextThen;
     }
 
-    deployer.deploy(Exchanger, admin, oracle)
+    deployer.deploy(Exchanger, admin)
         .then( () => Exchanger.deployed() )
         .then(function (_exchanger) {
             exchanger = _exchanger;

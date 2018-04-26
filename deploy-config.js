@@ -14,7 +14,6 @@ var accounts = [
 var owner = accounts[1];
 var manager = accounts[2];
 var admin = accounts[3];
-var oracle = accounts[4];
 
 var endTime = 1525132800;
 var tradesMaxCount = 20;
