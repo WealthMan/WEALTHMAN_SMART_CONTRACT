@@ -31,7 +31,7 @@ contract Portfolio {
         require(isRunning); 
         _; 
     }
-    modifier onlyOwner { 
+    modifier onlyOwner {
         require(msg.sender == owner); 
         _;
     }
@@ -48,6 +48,8 @@ contract Portfolio {
     event TradeStart(uint count);
     event TradeEnd();
     event OrderExpired(address fromToken, address toToken, uint amount);
+    event OrderCanceled(address fromToken, address toToken, uint amount);
+    event OrderCompleted(address fromToken, address toToken, uint amount, uint rate);
     event Withdraw(uint amount);
 
 
@@ -121,16 +123,22 @@ contract Portfolio {
         assert(exchangerAddr.send(_amount));
     }
 
-    function transferCompleted() public onlyExchanger {
-        ordersCountLeft--;
-        if (ordersCountLeft == 0) {
-            onTraiding = false;
-            emit TradeEnd();
-        }
+    function transferCompleted(address fromToken, address toToken, uint amount, uint rate) public onlyExchanger {
+        emit OrderCompleted(fromToken, toToken, amount, rate);
+        checkOrdersCount();
     }
 
     function transferTimeExpired(address fromToken, address toToken, uint amount) public onlyExchanger {
         emit OrderExpired(fromToken, toToken, amount);
+        checkOrdersCount();
+    }
+
+    function transferCanceled(address fromToken, address toToken, uint amount) public onlyExchanger {
+        emit OrderCanceled(fromToken, toToken, amount);
+        checkOrdersCount();
+    }
+
+    function checkOrdersCount() private {
         ordersCountLeft--;
         if (ordersCountLeft == 0) {
             onTraiding = false;
