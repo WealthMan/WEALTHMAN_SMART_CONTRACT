@@ -5,28 +5,21 @@ import "./PortfolioInterface.sol";
 
 contract Exchanger {
     address public admin;
-    address public oracle;
 
     uint public constant BASE = 1000000000000000000;
-    uint public forCurrenciesAllowableTime = 30 minutes;
     uint public forOrderAllowableTime = 3 hours;
 
     mapping (address => bool) public isTokenAllowed;
     mapping (address => bool) public isPortfolio;
 
-    struct Currency {
-        uint ratio; // * BASE
-        uint timestamp;
-    }
     struct Order {
         address portfolioFrom;
         address fromToken;
         address toToken;
         uint amount;
         uint timestamp;
+        bool isActive;
     }
-
-    mapping (address => mapping (address => Currency)) public currencies;
 
     Order[] public orders;
     bool private lockOrders = false;
@@ -35,27 +28,18 @@ contract Exchanger {
         require(msg.sender == admin); 
         _; 
     }
-    modifier onlyOracle() {
-        require(msg.sender == oracle);
-        _;
-    }
     modifier onlyPortfoilio() {
         require(isPortfolio[msg.sender]);
         _;
     }
 
-    event NeedCurrency(address _from, address _to);
     event NewTrade(address portfolio);
 
 
-    function Exchanger(address _admin, address _oracle) public {
+    function Exchanger(address _admin) public {
         admin = _admin;
-        oracle = _oracle;
     }
 
-    function changeForCurrienciesAllowableTime(uint _time) public onlyAdmin {
-        forCurrenciesAllowableTime = _time;
-    }
     function changeForOrderAllowableTime(uint _time) public onlyAdmin {
         forOrderAllowableTime = _time;
     }
@@ -71,16 +55,6 @@ contract Exchanger {
         isPortfolio[_portfolio] = true;
     }
 
-    function updateCurrencies(address[] _fromTokens, address[] _toTokens, uint[] _rates) public onlyOracle {
-        require(_fromTokens.length == _toTokens.length && _toTokens.length == _rates.length && _fromTokens.length > 0);
-
-        for (uint i = 0; i < _fromTokens.length; i++) {
-            require (_rates[i] != 0);
-            currencies[_fromTokens[i]][_toTokens[i]] = Currency({ratio:_rates[i], timestamp:now});
-        }
-    }
-
-
     function portfolioTrade(address[] _fromTokens, address[] _toTokens, uint[] _amounts) public onlyPortfoilio {
         assert (!lockOrders);
         lockOrders = true;
@@ -88,38 +62,34 @@ contract Exchanger {
         for (uint i = 0; i < _fromTokens.length; i++) {
             assert(isTokenAllowed[_fromTokens[i]] && isTokenAllowed[_toTokens[i]]);
 
-            if (!doTransfer(msg.sender, _fromTokens[i], _toTokens[i], _amounts[i])) {
-                orders.push(Order({
-                    portfolioFrom: msg.sender,
-                    fromToken: _fromTokens[i],
-                    toToken: _toTokens[i],
-                    amount: _amounts[i],
-                    timestamp: now
-                    }));
-            }
+            orders.push(Order({
+                portfolioFrom: msg.sender,
+                fromToken: _fromTokens[i],
+                toToken: _toTokens[i],
+                amount: _amounts[i],
+                timestamp: now,
+                isActive: true
+                }));
         }
 
         lockOrders = false;
         emit NewTrade(msg.sender);
     }
 
-    function doTransfer(address _portfolio, address _fromToken, address _toToken, uint _amount) private returns (bool) {
+    function doTransfer(address _portfolio, address _fromToken, address _toToken, uint _amount, uint _rate) private returns (bool) {
         if (_fromToken == 0) {
-            return transferFromEth(_portfolio, _fromToken, _toToken, _amount);
+            return transferFromEth(_portfolio, _fromToken, _toToken, _amount, _rate);
         }
         if (_toToken == 0) {
-            return transferToEth(_portfolio, _fromToken, _toToken, _amount);
+            return transferToEth(_portfolio, _fromToken, _toToken, _amount, _rate);
         }
-        return transferTokens(_portfolio, _fromToken, _toToken, _amount);
+        return transferTokens(_portfolio, _fromToken, _toToken, _amount, _rate);
     }
 
-    function transferFromEth(address _portfolio, address _fromToken, address _toToken, uint _amount) private returns (bool) {
-        if (now - currencies[_fromToken][_toToken].timestamp > forCurrenciesAllowableTime) {
-            emit NeedCurrency(_fromToken, _toToken);
-            return false;
-        }
+    function transferFromEth(address _portfolio, address _fromToken, address _toToken, uint _amount, uint _rate) private returns (bool) {
+        require(_fromToken == 0);
 
-        uint needAmount = calcNeedAmount(_amount, currencies[_fromToken][_toToken].ratio);
+        uint needAmount = calcNeedAmount(_amount, _rate);
         AbstractToken token = AbstractToken(_toToken);
         if (token.balanceOf(address(this)) < needAmount) {
             return false;
@@ -129,17 +99,13 @@ contract Exchanger {
         portfolioContact.transferEth(_amount);
         assert(token.transfer(_portfolio, needAmount));
 
-        portfolioContact.transferCompleted();
         return true;
     }
 
-    function transferToEth(address _portfolio, address _fromToken, address _toToken, uint _amount) private returns (bool) {
-        if (now - currencies[_fromToken][_toToken].timestamp > forCurrenciesAllowableTime) {
-            emit NeedCurrency(_fromToken, _toToken);
-            return false;
-        }
+    function transferToEth(address _portfolio, address _fromToken, address _toToken, uint _amount, uint _rate) private returns (bool) {
+        require(_toToken == 0);
 
-        uint needAmount = calcNeedAmount(_amount, currencies[_fromToken][_toToken].ratio);
+        uint needAmount = calcNeedAmount(_amount, _rate);
         AbstractToken token = AbstractToken(_fromToken);
         if (address(this).balance <= needAmount) {
             return false;
@@ -148,18 +114,11 @@ contract Exchanger {
         assert(token.transferFrom(_portfolio, address(this), _amount));
         assert(_portfolio.send(needAmount));
 
-        PortfolioInterface portfolioContact = PortfolioInterface(_portfolio);
-        portfolioContact.transferCompleted();
         return true;
     }
 
-    function transferTokens(address _portfolio, address _fromToken, address _toToken, uint _amount) private returns (bool) {
-        if (now - currencies[_fromToken][_toToken].timestamp > forCurrenciesAllowableTime) {
-            emit NeedCurrency(_fromToken, _toToken);
-            return false;
-        }
-
-        uint needAmount = calcNeedAmount(_amount, currencies[_fromToken][_toToken].ratio);
+    function transferTokens(address _portfolio, address _fromToken, address _toToken, uint _amount, uint _rate) private returns (bool) {
+        uint needAmount = calcNeedAmount(_amount, _rate);
         AbstractToken fromToken = AbstractToken(_fromToken);
         AbstractToken toToken = AbstractToken(_toToken);
         if (toToken.balanceOf(address(this)) < needAmount) {
@@ -169,8 +128,6 @@ contract Exchanger {
         assert(fromToken.transferFrom(_portfolio, address(this), _amount));
         assert(toToken.transfer(_portfolio, needAmount));
 
-        PortfolioInterface portfolioContact = PortfolioInterface(_portfolio);
-        portfolioContact.transferCompleted();
         return true;
     }
 
@@ -180,7 +137,29 @@ contract Exchanger {
         return res / BASE;
     }
 
-    function transferOrders() public onlyAdmin {
+    function completeOrders(uint[] indices, uint[] rates) public onlyAdmin {
+        require(indices.length == rates.length && indices.length > 0);
+
+        assert(!lockOrders);
+        lockOrders = true;
+
+        for (uint i = 0; i < indices.length; i++) {
+            if (!orders[indices[i]].isActive) {
+                continue;
+            }
+
+            if (doTransfer(orders[indices[i]].portfolioFrom, orders[indices[i]].fromToken, orders[indices[i]].toToken,
+                           orders[indices[i]].amount, rates[i])) {
+                PortfolioInterface(orders[indices[i]].portfolioFrom).transferCompleted(orders[indices[i]].fromToken,
+                                   orders[indices[i]].toToken, orders[indices[i]].amount, rates[i]);
+                orders[indices[i]].isActive = false;
+            }
+        }
+
+        lockOrders = false;
+    }
+
+    function cleanOrders() public onlyAdmin {
         assert(!lockOrders);
         lockOrders = true;
 
@@ -188,23 +167,30 @@ contract Exchanger {
         uint sz = 0;
 
         for (uint i = 0; i < orders.length; i++) {
-            PortfolioInterface portfolioContact = PortfolioInterface(orders[i].portfolioFrom);
+            if (now - orders[i].timestamp > forOrderAllowableTime && orders[i].isActive) {
+                PortfolioInterface(orders[i].portfolioFrom).transferTimeExpired(orders[i].fromToken, orders[i].toToken, orders[i].amount);
+                orders[i].isActive = false;
+            }
 
-            if (now - orders[i].timestamp > forOrderAllowableTime) {
-                portfolioContact.transferTimeExpired(orders[i].fromToken, orders[i].toToken, orders[i].amount);
-            } else {
-
-                if (doTransfer(orders[i].portfolioFrom, orders[i].fromToken, orders[i].toToken, orders[i].amount)) {
-                    portfolioContact.transferCompleted();
-                } else {
-                    newOrders[sz++] = orders[i];
-                }
+            if (orders[i].isActive) {
+                newOrders[sz++] = orders[i];
             }
         }
+
         delete(orders);
         for (i = 0; i < sz; i++) {
             orders.push(newOrders[i]);
         }
+
+        lockOrders = false;
+    }
+
+    function cancelOrder(uint i) public onlyAdmin {
+        assert(!lockOrders);
+        lockOrders = true;
+
+        PortfolioInterface(orders[i].portfolioFrom).transferCanceled(orders[i].fromToken, orders[i].toToken, orders[i].amount);
+        orders[i].isActive = false;
 
         lockOrders = false;
     }
