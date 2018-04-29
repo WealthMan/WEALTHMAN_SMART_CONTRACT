@@ -11,10 +11,16 @@ module.exports = function (deployer) {
     var tokens = [];
 
     function deployTokens() {
-        var nextThen = Token.new(admin).then(t => { tokens.push(t) });
+        var nextThen = Token.new(exchanger.address).then(t => {
+            tokens.push(t);
+            exchanger.allowToken(t.address, transact={from:admin});
+        });
         
         for (var i = 0; i < 3; i++) {
-            nextThen = nextThen.then( () => Token.new(admin) ).then( t => { tokens.push(t) } );
+            nextThen = nextThen.then( () => Token.new(exchanger.address) ).then( t => {
+                tokens.push(t);
+                exchanger.allowToken(t.address, transact={from:admin});
+            });
         }
         
         return nextThen;
@@ -31,15 +37,18 @@ module.exports = function (deployer) {
         .then( () => Portfolio.deployed() )
         .then( (_portfolio) => {
             portfolio = _portfolio;
-            
+
+            exchanger.addPortfolio(_portfolio.address, transact={from:admin});
+            exchanger.allowToken('0x0', transact={from:admin});
+
             var configObject = {
                 exchangerAddr : exchanger.address,
                 portfolioAddr: portfolio.address,
                 tokenAddrs: tokens.map(t => t.address),
-                portfolioAbi: portfolio.abi,
-                tokenAbi: Token.abi,
+                // portfolioAbi: portfolio.abi,
+                // tokenAbi: Token.abi,
             };
             
-            fs.writeFileSync('./afterDeployConfig.js', 'const CONFIG = ' + JSON.stringify(configObject) + ';');
+            fs.writeFileSync('../afterDeployConfig.js', 'var deploy_data = ' + JSON.stringify(configObject) + ';');
         });
 }
