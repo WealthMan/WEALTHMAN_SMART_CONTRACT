@@ -66,6 +66,11 @@ contract Portfolio {
         exchanger = Exchanger(_exchanger);
     }
 
+    function() payable {
+        if (!isRunning) {
+            deposit();
+        }
+    }
 
     function deposit() public onlyOwner payable {
         assert(!wasDeposit);
@@ -95,12 +100,13 @@ contract Portfolio {
 
             if (!usedToken[_toTokens[i]]) {
                 portfolioTokens.push(_toTokens[i]);
+                usedToken[_toTokens[i]] = true;
             }
 
             if (tokensAmountSum[_fromTokens[i]] == 0) {
                 tokensList[sz++] = _fromTokens[i];
             }
-            assert(tokensAmountSum[_fromTokens[i]] + _amounts[i] > _amounts[i]);
+            assert(tokensAmountSum[_fromTokens[i]] + _amounts[i] >= _amounts[i]);
             tokensAmountSum[_fromTokens[i]] += _amounts[i];
         }
 
