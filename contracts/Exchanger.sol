@@ -40,6 +40,9 @@ contract Exchanger {
         admin = _admin;
     }
 
+    function() payable public {
+    }
+
     function changeForOrderAllowableTime(uint _time) public onlyAdmin {
         forOrderAllowableTime = _time;
     }
